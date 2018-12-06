@@ -31,7 +31,113 @@
 **第一种方式：使用256 * 256 大小的块：**
 
 ```
+#include "pch.h"
+#include <iostream>
+#include <cmath>
+#include "./gdal/gdal_priv.h"
+#pragma comment(lib, "gdal_i.lib")
+using namespace std;
 
+int main()
+{
+	char* mulPath = (char*)"Mul_large.tif";
+	char* panPath = (char*)"Pan_large.tif";
+	char* fusPath = (char*)"Fus_large.tif";
+
+	GDALAllRegister();
+
+	// basic parameters
+	GDALDataset *poMulDS, *poPanDS, *poFusDS;
+	int imgXlen, imgYlen;
+	int i = 0, m = 0, n = 0;
+	float *bandR, *bandG, *bandB;
+	float *bandH, *bandS;
+	float *bandP;
+
+
+	// open datasets
+	poMulDS = (GDALDataset*)GDALOpenShared(mulPath, GA_ReadOnly);
+	poPanDS = (GDALDataset*)GDALOpenShared(panPath, GA_ReadOnly);
+	imgXlen = poMulDS->GetRasterXSize();
+	imgYlen = poMulDS->GetRasterYSize();
+	poFusDS = GetGDALDriverManager()->GetDriverByName("GTiff")->Create(
+		fusPath, imgXlen, imgYlen, 3, GDT_Byte, NULL);
+
+
+	int XNum, YNum;//x,y方向上块数
+	int sizex;//块宽度
+	int sizey;//块高度
+
+	//计算y方向上块数,块宽度,块高度
+	sizex = 256;
+	sizey = 256;
+	YNum = (imgYlen - 1) / sizey + 1;
+	XNum = (imgXlen - 1) / sizex + 1;
+
+	// allocating memory
+	bandR = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+	bandG = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+	bandB = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+	bandP = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+	bandH = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+	bandS = (float*)CPLMalloc(sizex * sizey * sizeof(float));
+
+	for (m = 0; m < YNum; m++)
+	{
+		for (n = 0; n < XNum; n++)
+		{
+			sizex = 256;
+			sizey = 256;
+			if (n == XNum - 1)
+			{
+				sizex = (imgXlen - 1) % 256 + 1;
+			}
+
+			if (m == YNum - 1)
+			{
+				sizey = (imgYlen - 1) % 256 + 1;
+			}
+			//读取当前块数据
+			poMulDS->GetRasterBand(1)->RasterIO(GF_Read, n * 256, m * 256, sizex,
+				sizey, bandR, sizex, sizey, GDT_Float32, 0, 0);
+			poMulDS->GetRasterBand(2)->RasterIO(GF_Read, n * 256, m * 256, sizex,
+				sizey, bandG, sizex, sizey, GDT_Float32, 0, 0);
+			poMulDS->GetRasterBand(3)->RasterIO(GF_Read, n * 256, m * 256, sizex,
+				sizey, bandB, sizex, sizey, GDT_Float32, 0, 0);
+			poPanDS->GetRasterBand(1)->RasterIO(GF_Read, n * 256, m * 256, sizex,
+				sizey, bandP, sizex, sizey, GDT_Float32, 0, 0);
+
+			for (i = 0; i < sizex * sizey; i++)
+			{
+				bandH[i] = -sqrt(2.0f) / 6.0f*bandR[i] - sqrt(2.0f) / 6.0f*bandG[i] + sqrt(2.0f) / 3.0f*bandB[i];
+				bandS[i] = 1.0f / sqrt(2.0f)*bandR[i] - 1 / sqrt(2.0f)*bandG[i];
+
+				bandR[i] = bandP[i] - 1.0f / sqrt(2.0f)*bandH[i] + 1.0f / sqrt(2.0f)*bandS[i];
+				bandG[i] = bandP[i] - 1.0f / sqrt(2.0f)*bandH[i] - 1.0f / sqrt(2.0f)*bandS[i];
+				bandB[i] = bandP[i] + sqrt(2.0f)*bandH[i];
+			}
+			poFusDS->GetRasterBand(1)->RasterIO(GF_Write, n * 256, m * 256, sizex, sizey,
+				bandR, sizex, sizey, GDT_Float32, 0, 0);
+			poFusDS->GetRasterBand(2)->RasterIO(GF_Write, n * 256, m * 256, sizex, sizey,
+				bandG, sizex, sizey, GDT_Float32, 0, 0);
+			poFusDS->GetRasterBand(3)->RasterIO(GF_Write, n * 256, m * 256, sizex, sizey,
+				bandB, sizex, sizey, GDT_Float32, 0, 0);
+		}
+	}
+
+	CPLFree(bandR);
+	CPLFree(bandG);
+	CPLFree(bandB);
+	CPLFree(bandH);
+	CPLFree(bandS);
+	CPLFree(bandP);
+
+	GDALClose(poMulDS);
+	GDALClose(poPanDS);
+	GDALClose(poFusDS);
+
+	return 0;
+}
 ```
 
 **第二种方式：每块的宽度为图像宽度，高度为256像素：**
@@ -140,19 +246,19 @@ int main()
 
 ***多光谱图像***
 
-![Mul_large](/img6/Mul_large.png)
+![Mul_large](/img6/Mul_large.PNG)
 
 ***全色图像***
 
-![Pan_large](/img6/Pan_large.png)
+![Pan_large](/img6/Pan_large.PNG)
 
-***方式一（256*256）结果图像***
+***方式一（256 X 256）结果图像***
 
-![result1](/img6/result1.png)
+![result1](/img6/result1.PNG)
 
 ***方式二（图像宽度  X 256）结果图像***
 
-![result2](/img6/result2.png)
+![result2](/img6/result2.PNG)
 
 <u>分别用第一种方式和第二种方式生成的图像可于文件夹***img6***中下载，分别为***Fus_large(1).tif***和***Fus_large(2).tif***。</u>
 
